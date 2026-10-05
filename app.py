@@ -2,118 +2,122 @@ import streamlit as st
 import pandas as pd
 import os
 from pypdf import PdfReader
+from transformers import pipeline
 
-# 1. Setup Layout
-st.set_page_config(page_title="Local AI Data & Book Assistant", layout="wide")
-st.title("📟 Local Data Storage & Book Analyzer (No Internet Required)")
+# 1. Page Configuration
+st.set_page_config(page_title="AI Chip Assistant", layout="wide")
+st.title("🤖 AI Chip: Local Data & Conversational Assistant")
 
 STORAGE_DIR = "stored_data"
 if not os.path.exists(STORAGE_DIR):
     os.makedirs(STORAGE_DIR)
 
-# Sidebar view for saved items
+# Sidebar for Storage View
 with st.sidebar:
-    st.header("📂 Local Storage Cabinet")
+    st.header("📁 Local Data Cabinet")
     stored_files = os.listdir(STORAGE_DIR)
     if stored_files:
         for file in stored_files:
-            st.write(f"📁 {file}")
+            st.write(f"📄 {file}")
     else:
-        st.write("Storage is empty.")
+        st.write("No files saved yet.")
 
-# 2. File Uploader supporting Spreadsheets & PDFs
-st.subheader("📥 Drop your Data Sheets or Book PDFs here")
-uploaded_file = st.file_uploader("Upload CSV, Excel, or PDF", type=["csv", "xlsx", "pdf"])
+# 2. Download/Cache Local Conversational Model
+@st.cache_resource
+def load_conversational_brain():
+    # Loads a free, lightweight conversational model that runs locally on the server
+    return pipeline("text-generation", model="microsoft/DialoGPT-medium", pad_token_id=50256)
 
-file_text_content = ""
+st.info("🔄 Waking up local conversational core... (This may take a moment on first boot)")
+chat_brain = load_conversational_brain()
+
+# 3. File Processing Component
+st.subheader("📥 Upload Data or Books")
+uploaded_file = st.file_uploader("Drop a CSV, Excel, or Book PDF here", type=["csv", "xlsx", "pdf"])
+
+file_context = ""
 df_context = None
 
 if uploaded_file is not None:
     file_path = os.path.join(STORAGE_DIR, uploaded_file.name)
     with open(file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-    st.success(f"Successfully secured in storage: {uploaded_file.name}")
+    st.success(f"Stored securely: {uploaded_file.name}")
 
-    # Process based on file type
     if uploaded_file.name.endswith('.pdf'):
         try:
             reader = PdfReader(file_path)
-            # Extract text from the first few pages for local processing
-            full_text = []
-            for i, page in enumerate(reader.pages):
-                text = page.extract_text()
-                if text:
-                    full_text.append(text)
-            file_text_content = "\n".join(full_text)
-            st.info(f"✨ Read completed! Extracted {len(reader.pages)} pages from the book.")
+            # Gather text from first 5 pages to keep processing swift
+            pages_to_read = min(5, len(reader.pages))
+            text_slices = [reader.pages[i].extract_text() for i in range(pages_to_read)]
+            file_context = " ".join([t for t in text_slices if t])
+            st.info(f"📖 Loaded book context ({pages_to_read} pages extracted). Ready to analyze.")
         except Exception as e:
-            st.error(f"Could not read PDF: {e}")
+            st.error(f"Error processing book text: {e}")
             
     elif uploaded_file.name.endswith(('.csv', '.xlsx')):
         try:
-            if uploaded_file.name.endswith('.csv'):
-                df_context = pd.read_csv(file_path)
-            else:
-                df_context = pd.read_excel(file_path)
-            st.info(f"📊 Dataset loaded. Found columns: {list(df_context.columns)}")
+            df_context = pd.read_csv(file_path) if uploaded_file.name.endswith('.csv') else pd.read_excel(file_path)
+            st.info(f"📊 Dataset loaded successfully. Target columns: {list(df_context.columns)}")
         except Exception as e:
-            st.error(f"Error loading table: {e}")
+            st.error(f"Error loading matrix: {e}")
 
-# 3. Local Interaction Box (Simulated Chat Interface)
-st.subheader("💬 Command Console")
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# 4. Human-like Chat Interface
+st.subheader("💬 Chat with AI Chip")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-for chat in st.session_state.chat_history:
-    with st.chat_message(chat["role"]):
-        st.write(chat["content"])
+# Display current chat stream
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-if user_input := st.chat_input("Ask me to look for a topic, sort a sheet, or summarize..."):
+if user_input := st.chat_input("Talk to me, ask me to sort data, or summarize a topic..."):
     with st.chat_message("user"):
         st.write(user_input)
-    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    st.session_state.messages.append({"role": "user", "content": user_input})
     
-    response = ""
     query = user_input.lower()
+    ai_reply = ""
 
-    # Scenario A: Processing a Data Spreadsheet
-    if df_context is not None:
-        if "sort by" in query:
-            col_target = user_input.split("sort by")[-1].strip().strip('`').strip()
-            matched_cols = [c for c in df_context.columns if c.lower() == col_target.lower()]
-            
-            if matched_cols:
-                sorted_df = df_context.sort_values(by=matched_cols[0])
-                new_file = f"sorted_{uploaded_file.name}"
-                sorted_df.to_csv(os.path.join(STORAGE_DIR, new_file), index=False)
-                response = f"✅ I have sorted your rows by `{matched_cols[0]}` and automatically generated a new file for you: `{new_file}` inside your storage dashboard."
-            else:
-                response = f"I couldn't find a exact match for column '{col_target}'. Available choices are: {list(df_context.columns)}"
+    # Sort operation override
+    if df_context is not None and "sort by" in query:
+        col_target = user_input.split("sort by")[-1].strip().strip('`').strip()
+        matched = [c for c in df_context.columns if c.lower() == col_target.lower()]
+        if matched:
+            sorted_df = df_context.sort_values(by=matched[0])
+            new_f = f"sorted_{uploaded_file.name}"
+            sorted_df.to_csv(os.path.join(STORAGE_DIR, new_f), index=False)
+            ai_reply = f"I've gone ahead and sorted that dataset by `{matched[0]}` for you! I saved the result as a new file called `{new_f}` in our storage cabinet."
         else:
-            response = f"📊 Data Summary Request:\nThis dataset holds {len(df_context)} rows across columns: {list(df_context.columns)}. Try telling me to 'sort by [column name]'!"
+            ai_reply = f"I took a look, but I couldn't find a column matching '{col_target}'. The columns I can see are: {list(df_context.columns)}"
+            
+    # Document reading focus
+    elif file_context and ("explain" in query or "about" in query or "summarize" in query):
+        keyword = query.replace("explain", "").replace("about", "").replace("summarize", "").strip()
+        sentences = file_context.split(". ")
+        matches = [s for s in sentences if keyword in s.lower()]
+        
+        if matches:
+            context_snippet = ". ".join(matches[:2])
+            ai_reply = f"Looking at your uploaded file for details on '{keyword}': {context_snippet}."
+        else:
+            ai_reply = f"I scanned the document for '{keyword}' but didn't see an exact sentence match. Could you rephrase your question or specify another topic?"
 
-    # Scenario B: Analyzing a Book PDF locally
-    elif file_text_content:
-        # Local rule-based search engine to look inside the book text safely
-        if "know about" in query or "find" in query or "explain" in query:
-            # Extract topic term
-            topic = query.replace("know about", "").replace("find", "").replace("explain", "").strip()
-            
-            # Simple offline string extraction matching your exact paragraphs
-            paragraphs = file_text_content.split("\n")
-            matches = [p for p in paragraphs if topic in p.lower()]
-            
-            if matches:
-                summary_snippet = "\n\n• ".join(matches[:4]) # Give up to 4 matched contextual sentences
-                response = f"📖 Here is what I found regarding **'{topic}'** inside your uploaded text:\n\n• {summary_snippet}"
-            else:
-                response = f"🔍 I scanned the entire text context but couldn't find explicit sentences containing '{topic}'. Try checking your spelling or look for another keyword!"
-        else:
-            response = f"📚 Your file is uploaded and safely stored offline. Type: 'explain [topic name]' or 'know about [topic]' to filter details from the book pages instantly."
-    
+    # Fallback to natural chat conversational intelligence
     else:
-        response = "Please drag/drop a spreadsheet or book PDF above first so I have data to store and process for you!"
+        try:
+            # Build conversation prompt string from history
+            recent_chat = " ".join([m["content"] for m in st.session_state.messages[-3:]])
+            generated_outputs = chat_brain(recent_chat, max_length=100, num_return_sequences=1)
+            ai_reply = generated_outputs[0]['generated_text'].replace(recent_chat, "").strip()
+            
+            # Fallback block if output generation returns empty
+            if not ai_reply:
+                ai_reply = "I hear you! I am ready to process your files or just chat. Let me know what you'd like to dive into next."
+        except:
+            ai_reply = "I'm right here listening! Upload a data sheet or a book PDF above, and I can extract explanations or sort rows for you."
 
     with st.chat_message("assistant"):
-        st.write(response)
-    st.session_state.chat_history.append({"role": "assistant", "content": response})
+        st.write(ai_reply)
+    st.session_state.messages.append({"role": "assistant", "content": ai_reply})
