@@ -6,7 +6,8 @@ from pypdf import PdfReader
 from transformers import pipeline
 import plotly.express as px
 from gtts import gTTS
-from pydub import AudioSegment
+import soundfile as sf
+from scipy.signal import resample
 
 # 1. Page Configuration & Setup
 st.set_page_config(page_title="AI Chip Pro", layout="wide")
@@ -24,34 +25,35 @@ def load_conversational_brain():
 st.info("🔄 Optimizing localized speech and deep text brains... Please wait a moment.")
 chat_brain = load_conversational_brain()
 
-# Helper function to generate deep male text-to-speech audio locally
+# Helper function to generate deep male text-to-speech audio locally using scipy
 def speak_text_deep_male(text_to_speak):
     try:
-        # Clean out markdown stars and symbols for a smooth audio read
         clean_text = text_to_speak.replace("📊", "").replace("📖", "").replace("**", "").replace("🔍", "").strip() 
         if clean_text:
             # 1. Generate base voice audio
-            tts = gTTS(text=clean_text, lang='en', tld='co.uk') # Using UK accent base for a slightly deeper tone
+            tts = gTTS(text=clean_text, lang='en', tld='co.uk')
             raw_file = "raw_speech.mp3"
-            deep_file = "deep_speech.mp3"
+            deep_file = "deep_speech.wav"
             tts.save(raw_file)
             
-            # 2. Shift the audio pitch down locally to create a deep male effect
-            sound = AudioSegment.from_file(raw_file, format="mp3")
+            # 2. Read data and shift the audio pitch down locally to create a deep male effect
+            data, sample_rate = sf.read(raw_file)
             
-            # Lowering the sample rate shifts the pitch downward into a deeper baritone register
-            new_sample_rate = int(sound.frame_rate * 0.78) 
-            deep_sound = sound._spawn(sound.raw_data, overrides={'frame_rate': new_sample_rate})
-            deep_sound = deep_sound.set_frame_rate(sound.frame_rate)
-            deep_sound.export(deep_file, format="mp3")
+            # Lowering the sample rate changes the playback speed and deepens the register
+            pitch_factor = 0.78
+            new_num_samples = int(len(data) * (1.0 / pitch_factor))
+            deep_data = resample(data, new_num_samples)
+            
+            # Save the processed deep audio wave data file
+            sf.write(deep_file, deep_data, sample_rate)
             
             # 3. Embed the deep voice audio player directly below the text block
             with open(deep_file, "rb") as f:
-                data = f.read()
-                b64 = base64.b64encode(data).decode()
+                audio_bytes = f.read()
+                b64 = base64.b64encode(audio_bytes).decode()
                 md = f"""
                     <audio autoplay="true" controls style="width: 100%; margin-top: 10px;">
-                    <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                    <source src="data:audio/wav;base64,{b64}" type="audio/wav">
                     </audio>
                     """
                 st.markdown(md, unsafe_allow_html=True)
@@ -97,11 +99,10 @@ if uploaded_file is not None:
     if uploaded_file.name.endswith('.pdf'):
         try:
             reader = PdfReader(file_path)
-            pages_to_read = min(8, len(reader.pages)) # Expanded text reading depth
+            pages_to_read = min(8, len(reader.pages))
             text_slices = [reader.pages[i].extract_text() for i in range(pages_to_read)]
             file_context = " ".join([t for t in text_slices if t])
             
-            # Print explicit scannable summary details instantly on screen
             st.markdown("### 📚 **Document Analysis Summary**")
             st.markdown(f"* Total Length: **{len(reader.pages)} pages** detected inside file.")
             st.markdown(f"* Scan Status: **First {pages_to_read} pages** successfully processed into text layers.")
@@ -113,7 +114,6 @@ if uploaded_file is not None:
         try:
             df_context = pd.read_csv(file_path) if uploaded_file.name.endswith('.csv') else pd.read_excel(file_path)
             
-            # Print beautiful spreadsheet summary stats directly on upload
             st.markdown("### 📊 **Dataset Metrics Summary**")
             st.markdown(f"* Dataset Structure: Found a total of **{df_context.shape[0]} rows** across **{df_context.shape[1]} data fields**.")
             st.markdown(f"* Columns List: `{list(df_context.columns)}`")
@@ -157,7 +157,7 @@ if user_input := st.chat_input("Ask me to analyze your text context, sort column
             sorted_df.to_csv(os.path.join(STORAGE_DIR, new_f), index=False)
             
             ai_reply = f"### ✅ **Data Sorting Operation Complete**\n\n" \
-                       f"I have thoroughly processed the spreadsheet and sorted all tracking profiles by the requested column: **{matched[0]}**.\n\n" \
+                       f"I have thoroughly processed the spreadsheet and sorted all tracking profiles by the requested column: **{matched}**.\n\n" \
                        f"* Target Rows Sorted: **{len(sorted_df)} entries** processed.\n" \
                        f"* Output Saved As: **`{new_f}`**\n\n" \
                        f"You can access the updated file directly inside your sidebar storage tab."
@@ -193,7 +193,12 @@ if user_input := st.chat_input("Ask me to analyze your text context, sort column
             if raw_reply:
                 ai_reply = f"### 🤖 **AI Response**\n\n{raw_reply}"
             else:
-                ai_reply = "### 🤖 **System Ready**\n\nI am locked in and completely operational! Drop in a book PDF or data sheet above, and let me know what analytical task you would like to run."
+                ai_reply = "### 🤖 **System Ready**\n\nI am logged in and completely operational! Drop in a book PDF or data sheet above, and let me know what analytical task you would like to run."
         except:
             ai_reply = "### 🤖 **System Ready**\n\nI am listening closely right here! Go ahead and drop in your data sheets or book files above, and we can explore them together."
 
+    # Post processing output stream (Prints text response and pushes Deep Voice audio simultaneously)
+    with st.chat_message("assistant"):
+        st.markdown(ai_reply)
+        speak_text_deep_male(ai_reply)
+        
