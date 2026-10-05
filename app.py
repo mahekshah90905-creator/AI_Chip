@@ -15,8 +15,8 @@ if not os.path.exists(STORAGE_DIR):
 # 2. Setup Background Conversational & Text Core
 @st.cache_resource
 def load_text_brain():
-    # Using a fast, high-quality text instruction engine that runs locally on the free cloud tier
-    return pipeline("text2text-generation", model="google/flan-t5-base")
+    # FIXED TASK NAME: Changed text2text-generation to text-generation to eliminate the KeyError crash
+    return pipeline("text-generation", model="google/flan-t5-base")
 
 st.info("🔄 Tuning conversational data chip... Running lightning-fast optimization.")
 text_brain = load_text_brain()
@@ -75,7 +75,7 @@ if uploaded_file is not None:
             df_context = pd.read_csv(file_path) if uploaded_file.name.endswith('.csv') else pd.read_excel(file_path)
             
             st.markdown("### 📊 **Dataset Metrics Summary**")
-            st.markdown(f"* Grid Structure: **{df_context.shape[0]} rows** detected across **{df_context.shape[1]} categories**.")
+            st.markdown(f"* Grid Structure: **{df_context.shape} rows** detected across **{df_context.shape} categories**.")
             st.markdown(f"* Available Fields: `{list(df_context.columns)}`")
         except Exception as e:
             st.error(f"Error compiling grid matrix: {e}")
@@ -98,17 +98,26 @@ if user_input := st.chat_input("Talk to me, tell me your name, or ask me to sort
     query = user_input.lower()
     ai_reply = ""
 
-    # Feature A: Direct Analytical Sorting Command Processing
-    if df_context is not None and "sort by" in query:
+    # Feature A: Direct Conversational Overrides (Handles introductions naturally)
+    if "hello" in query or "hi " in query or query == "hi":
+        ai_reply = "### 🤖 **AI Chip Response**\n\nHello there! I am your AI Chip analysis assistant. Tell me your name, or drop a file above so we can get to work analyzing your data!"
+    
+    elif "name is" in query:
+        name_extracted = user_input.split("name is")[-1].strip().replace("**", "").replace(".", "")
+        st.session_state["user_name"] = name_extracted
+        ai_reply = f"### 🤖 **AI Chip Response**\n\nIt is fantastic to meet you, **{name_extracted}**! I have locked your profile into my active memory bank. What kind of dataset or textbook are we going to tear into today?"
+    
+    # Feature B: Direct Analytical Sorting Command Processing
+    elif df_context is not None and "sort by" in query:
         col_target = user_input.split("sort by")[-1].strip().strip('`').strip()
         matched = [c for c in df_context.columns if c.lower() == col_target.lower()]
         if matched:
-            sorted_df = df_context.sort_values(by=matched[0])
+            sorted_df = df_context.sort_values(by=matched)
             new_f = f"sorted_{uploaded_file.name}"
             sorted_df.to_csv(os.path.join(STORAGE_DIR, new_f), index=False)
             
             ai_reply = f"### ✅ **Data Matrix Sorted**\n\n" \
-                       f"I've successfully structured your table rows by **{matched[0]}**.\n\n" \
+                       f"I've successfully structured your table rows by **{matched}**.\n\n" \
                        f"* Records Actioned: **{len(sorted_df)} entries** processed.\n" \
                        f"* Output Target: Saved as **`{new_f}`** inside your storage cabinet panel."
         else:
@@ -116,7 +125,7 @@ if user_input := st.chat_input("Talk to me, tell me your name, or ask me to sort
                        f"I searched but couldn't verify an active field named '**{col_target}**'.\n\n" \
                        f"Verified fields inside this file are: `{list(df_context.columns)}`."
             
-    # Feature B: Document File Deep Context Lookups
+    # Feature C: Document File Deep Context Lookups
     elif file_context and ("explain" in query or "about" in query or "summarize" in query or "know" in query):
         keyword = query.replace("explain", "").replace("about", "").replace("summarize", "").replace("know", "").strip()
         sentences = file_context.split(". ")
@@ -132,31 +141,24 @@ if user_input := st.chat_input("Talk to me, tell me your name, or ask me to sort
             ai_reply = f"### 🔍 **Document Scan Alert**\n\n" \
                        f"I read through the uploaded book pages but did not find an explicit match for the topic phrase '**{keyword}**'."
 
-    # Feature C: Fast, Natural Human-Like Chat Core (Greets back, answers questions dynamically)
+    # Feature D: Local Language Model Conversational Generation
     else:
         try:
-            # Construct a dynamic prompt containing context history for the model
             conversation_history = ""
             for m in st.session_state.messages[-3:]:
                 clean_role = "Human" if m["role"] == "user" else "Assistant"
                 conversation_history += f"{clean_role}: {m['content'].replace('**', '')}\n"
             
-            prompt_input = f"Answer this conversation naturally as a clever assistant:\n{conversation_history}Assistant:"
+            prompt_input = f"Dialogue:\n{conversation_history}Assistant response:"
+            raw_response = text_brain(prompt_input, max_length=100, do_sample=True, temperature=0.7)[0]['generated_text']
             
-            # Predict natural chat output text
-            raw_response = text_brain(prompt_input, max_length=120, do_sample=True, temperature=0.7)[0]['generated_text']
-            
-            # Formatting wrap
-            ai_reply = f"### 🤖 **AI Chip Response**\n\n{raw_response.strip()}"
-        except Exception as e:
-            # Safe local fallback conversational engine rules
-            if "hello" in query or "hi" in query:
-                ai_reply = "### 🤖 **AI Chip Response**\n\nHello there! I'm your data and analysis chip. What project or file are we diving into today?"
-            elif "name is" in query:
-                name_extracted = user_input.split("name is")[-1].strip().replace("**", "")
-                ai_reply = f"### 🤖 **AI Chip Response**\n\nIt is great to meet you, **{name_extracted}**! I have logged your profile into active workspace memory. How can I help you analyze your documents today?"
-            else:
-                ai_reply = "### 🤖 **AI Chip Response**\n\nI hear you loud and clear! I'm ready to chat or run analytics on any data sheets or book files you upload above."
+            # Remove prompt echo if the model outputs it
+            processed_reply = raw_response.replace(prompt_input, "").strip()
+            ai_reply = f"### 🤖 **AI Chip Response**\n\n{processed_reply}"
+        except:
+            # Dynamic greeting using stored profile name if generation hits a local ceiling
+            username = st.session_state.get("user_name", "friend")
+            ai_reply = f"### 🤖 **AI Chip Response**\n\nI am right here with you, **{username}**! Go ahead and ask me a general question, or pass me a data spreadsheet or book up above so I can break down the facts for you."
 
     # Render clean bold response instantly on screen
     with st.chat_message("assistant"):
