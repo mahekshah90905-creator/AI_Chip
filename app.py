@@ -21,12 +21,11 @@ def load_conversational_brain():
     return pipeline("text-generation", model="microsoft/DialoGPT-medium", pad_token_id=50256)
 
 st.info("🔄 Optimizing localized speech and text brains... Please wait a moment.")
-chat_brain = load_conversational_brain()
-
 # Helper function to generate and play audio text-to-speech safely online
 def speak_text(text_to_speak):
     try:
-        clean_text = text_to_speak.split("📊")[0].split("📖")[0].strip() # Clean out visual symbols for smooth voice audio
+        # CLEANED FIX: Corrected text cleaning syntax
+        clean_text = text_to_speak.replace("📊", "").replace("📖", "").strip() 
         if clean_text:
             tts = gTTS(text=clean_text, lang='en')
             tts.save("speech.mp3")
@@ -38,7 +37,10 @@ def speak_text(text_to_speak):
                     <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
                     </audio>
                     """
-                st.markdown(md, unsafe_allow_allowed_folder=True, unsafe_allow_html=True)
+                st.markdown(md, unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Voice engine notification: {e}")
+
     except Exception as e:
         st.error(f"Voice engine notification: {e}")
 
