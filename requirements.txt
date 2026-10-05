@@ -6,4 +6,5 @@ transformers
 torch
 plotly
 gTTS
-pydub
+scipy
+soundfile
