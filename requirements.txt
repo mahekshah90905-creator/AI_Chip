@@ -5,6 +5,3 @@ pypdf
 transformers
 torch
 plotly
-gTTS
-scipy
-soundfile
