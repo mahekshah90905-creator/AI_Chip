@@ -1,123 +1,119 @@
 import streamlit as st
 import pandas as pd
-import openai
 import os
-import json
+from pypdf import PdfReader
 
-# 1. Setup App Layout and Directory
-st.set_page_config(page_title="AI Data Analyst App", layout="wide")
-st.title("🤖 AI Data Analysis & Storage Assistant")
+# 1. Setup Layout
+st.set_page_config(page_title="Local AI Data & Book Assistant", layout="wide")
+st.title("📟 Local Data Storage & Book Analyzer (No Internet Required)")
 
 STORAGE_DIR = "stored_data"
 if not os.path.exists(STORAGE_DIR):
     os.makedirs(STORAGE_DIR)
 
-# 2. API Key Management 
-# Securely prompt for the API key in the sidebar
+# Sidebar view for saved items
 with st.sidebar:
-    st.header("Settings")
-    api_key = st.text_input("Enter OpenAI API Key", type="password")
-    
-    st.header("📂 Stored Files")
+    st.header("📂 Local Storage Cabinet")
     stored_files = os.listdir(STORAGE_DIR)
     if stored_files:
         for file in stored_files:
-            st.write(f"📄 {file}")
+            st.write(f"📁 {file}")
     else:
-        st.write("No files saved yet.")
+        st.write("Storage is empty.")
 
-if not api_key:
-    st.warning("Please enter your OpenAI API key in the sidebar to start!")
-    st.stop()
+# 2. File Uploader supporting Spreadsheets & PDFs
+st.subheader("📥 Drop your Data Sheets or Book PDFs here")
+uploaded_file = st.file_uploader("Upload CSV, Excel, or PDF", type=["csv", "xlsx", "pdf"])
 
-# Initialize OpenAI client
-client = openai.OpenAI(api_key=api_key)
-
-# 3. File Uploading Component
-st.subheader("📤 Upload Data File")
-uploaded_file = st.file_uploader("Choose a CSV or Excel file to analyze and store", type=["csv", "xlsx"])
+file_text_content = ""
+df_context = None
 
 if uploaded_file is not None:
-    # Save file locally to storage directory
     file_path = os.path.join(STORAGE_DIR, uploaded_file.name)
     with open(file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
-    st.success(f"Successfully stored and loaded: {uploaded_file.name}")
+    st.success(f"Successfully secured in storage: {uploaded_file.name}")
 
-# 4. Initialize Chat History
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "system", "content": "You are a data analysis assistant. You can read, sort, and analyze datasets, and help users save new files."}
-    ]
-
-# Display older chat messages
-for message in st.session_state.messages:
-    if message["role"] != "system":
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-
-# 5. Chat Interface and Logic
-if user_command := st.chat_input("Ask me to sort, analyze, or process your data..."):
-    # Display user query
-    with st.chat_message("user"):
-        st.write(user_command)
-    st.session_state.messages.append({"role": "user", "content": user_command})
-
-    # Read the data context if a file exists
-    data_context = ""
-    if uploaded_file is not None:
+    # Process based on file type
+    if uploaded_file.name.endswith('.pdf'):
+        try:
+            reader = PdfReader(file_path)
+            # Extract text from the first few pages for local processing
+            full_text = []
+            for i, page in enumerate(reader.pages):
+                text = page.extract_text()
+                if text:
+                    full_text.append(text)
+            file_text_content = "\n".join(full_text)
+            st.info(f"✨ Read completed! Extracted {len(reader.pages)} pages from the book.")
+        except Exception as e:
+            st.error(f"Could not read PDF: {e}")
+            
+    elif uploaded_file.name.endswith(('.csv', '.xlsx')):
         try:
             if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(file_path)
+                df_context = pd.read_csv(file_path)
             else:
-                df = pd.read_excel(file_path)
-            
-            # Send a summary snippet of the data structure to the AI
-            data_context = f"\n\nActive File: {uploaded_file.name}\nColumns: {list(df.columns)}\nData Preview (First 3 rows):\n{df.head(3).to_string()}"
+                df_context = pd.read_excel(file_path)
+            st.info(f"📊 Dataset loaded. Found columns: {list(df_context.columns)}")
         except Exception as e:
-            data_context = f"\n\n(Error reading file: {str(e)})"
+            st.error(f"Error loading table: {e}")
 
-    # Append context dynamically to the prompt for the AI
-    ai_prompt = st.session_state.messages + [{"role": "system", "content": f"Use this data context if needed: {data_context}"}]
+# 3. Local Interaction Box (Simulated Chat Interface)
+st.subheader("💬 Command Console")
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
-    # Generate response from OpenAI
+for chat in st.session_state.chat_history:
+    with st.chat_message(chat["role"]):
+        st.write(chat["content"])
+
+if user_input := st.chat_input("Ask me to look for a topic, sort a sheet, or summarize..."):
+    with st.chat_message("user"):
+        st.write(user_input)
+    st.session_state.chat_history.append({"role": "user", "content": user_input})
+    
+    response = ""
+    query = user_input.lower()
+
+    # Scenario A: Processing a Data Spreadsheet
+    if df_context is not None:
+        if "sort by" in query:
+            col_target = user_input.split("sort by")[-1].strip().strip('`').strip()
+            matched_cols = [c for c in df_context.columns if c.lower() == col_target.lower()]
+            
+            if matched_cols:
+                sorted_df = df_context.sort_values(by=matched_cols[0])
+                new_file = f"sorted_{uploaded_file.name}"
+                sorted_df.to_csv(os.path.join(STORAGE_DIR, new_file), index=False)
+                response = f"✅ I have sorted your rows by `{matched_cols[0]}` and automatically generated a new file for you: `{new_file}` inside your storage dashboard."
+            else:
+                response = f"I couldn't find a exact match for column '{col_target}'. Available choices are: {list(df_context.columns)}"
+        else:
+            response = f"📊 Data Summary Request:\nThis dataset holds {len(df_context)} rows across columns: {list(df_context.columns)}. Try telling me to 'sort by [column name]'!"
+
+    # Scenario B: Analyzing a Book PDF locally
+    elif file_text_content:
+        # Local rule-based search engine to look inside the book text safely
+        if "know about" in query or "find" in query or "explain" in query:
+            # Extract topic term
+            topic = query.replace("know about", "").replace("find", "").replace("explain", "").strip()
+            
+            # Simple offline string extraction matching your exact paragraphs
+            paragraphs = file_text_content.split("\n")
+            matches = [p for p in paragraphs if topic in p.lower()]
+            
+            if matches:
+                summary_snippet = "\n\n• ".join(matches[:4]) # Give up to 4 matched contextual sentences
+                response = f"📖 Here is what I found regarding **'{topic}'** inside your uploaded text:\n\n• {summary_snippet}"
+            else:
+                response = f"🔍 I scanned the entire text context but couldn't find explicit sentences containing '{topic}'. Try checking your spelling or look for another keyword!"
+        else:
+            response = f"📚 Your file is uploaded and safely stored offline. Type: 'explain [topic name]' or 'know about [topic]' to filter details from the book pages instantly."
+    
+    else:
+        response = "Please drag/drop a spreadsheet or book PDF above first so I have data to store and process for you!"
+
     with st.chat_message("assistant"):
-        response_placeholder = st.empty()
-        
-        try:
-            # Check for explicitly requested operations like sorting
-            if "sort by" in user_command.lower() and uploaded_file is not None:
-                # Basic automated sorting capability example
-                col_to_sort = user_command.lower().split("sort by")[-1].strip()
-                # Clean up punctuation
-                col_to_sort = ''.join(e for e in col_to_sort if e.isalnum() or e == '_')
-                
-                # Match column regardless of case
-                matched_col = [c for c in df.columns if c.lower() == col_to_sort.lower()]
-                if matched_col:
-                    sorted_df = df.sort_values(by=matched_col[0])
-                    new_filename = f"sorted_{uploaded_file.name}"
-                    new_filepath = os.path.join(STORAGE_DIR, new_filename)
-                    
-                    if new_filename.endswith('.csv'):
-                        sorted_df.to_csv(new_filepath, index=False)
-                    else:
-                        sorted_df.to_excel(new_filepath, index=False)
-                        
-                    ai_response = f"I have successfully **sorted** the data by `{matched_col[0]}` and created a new file for you: `{new_filename}` inside your storage cabinet!"
-                else:
-                    ai_response = f"I tried to sort the data, but I couldn't find a column named '{col_to_sort}'. Available columns are: {list(df.columns)}"
-            
-            else:
-                # Regular ChatGPT response logic for general analysis and answering questions
-                completion = client.chat.completions.create(
-                    model="gpt-4o-mini", # Lightweight, cost-efficient model
-                    messages=ai_prompt
-                )
-                ai_response = completion.choices[0].message.content
-
-            response_placeholder.markdown(ai_response)
-            st.session_state.messages.append({"role": "assistant", "content": ai_response})
-            
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+        st.write(response)
+    st.session_state.chat_history.append({"role": "assistant", "content": response})
