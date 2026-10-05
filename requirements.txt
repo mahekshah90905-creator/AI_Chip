@@ -4,3 +4,5 @@ openpyxl
 pypdf
 transformers
 torch
+plotly
+gTTS
